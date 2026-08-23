@@ -11,11 +11,19 @@ module.exports = {
   port: process.env.PORT || 4000,
 
   db: {
+    // Si DATABASE_URL está presente (ej. la connection string que da
+    // Supabase en "Connect" > Transaction pooler), se usa esa directamente
+    // y se ignoran los campos PG_* sueltos. Esto evita tener que desarmar
+    // el string a mano en host/puerto/usuario.
+    connectionString: process.env.DATABASE_URL || null,
     host: process.env.PG_HOST || 'localhost',
     port: process.env.PG_PORT || 5432,
     user: process.env.PG_USER || 'arcade_user',
     password: process.env.PG_PASSWORD || 'change_me',
     database: process.env.PG_DATABASE || 'arcade_platform',
+    // Supabase (y la mayoría de proveedores cloud de Postgres) requieren
+    // SSL. Se activa automáticamente si hay DATABASE_URL.
+    ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
   },
 
   redis: {
