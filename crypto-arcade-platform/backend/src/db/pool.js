@@ -6,15 +6,24 @@
 const { Pool } = require('pg');
 const config = require('../config');
 
-const pool = new Pool({
-  host: config.db.host,
-  port: config.db.port,
-  user: config.db.user,
-  password: config.db.password,
-  database: config.db.database,
-  max: 20,
-  idleTimeoutMillis: 30000,
-});
+const pool = new Pool(
+  config.db.connectionString
+    ? {
+        connectionString: config.db.connectionString,
+        ssl: config.db.ssl,
+        max: 20,
+        idleTimeoutMillis: 30000,
+      }
+    : {
+        host: config.db.host,
+        port: config.db.port,
+        user: config.db.user,
+        password: config.db.password,
+        database: config.db.database,
+        max: 20,
+        idleTimeoutMillis: 30000,
+      }
+);
 
 pool.on('error', (err) => {
   console.error('[PG] Error inesperado en cliente idle', err);
