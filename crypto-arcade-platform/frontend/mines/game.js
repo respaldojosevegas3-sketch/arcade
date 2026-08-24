@@ -4,7 +4,7 @@
 // servidor responde. Esto es intencional: toda la lógica de negocio y
 // el RNG viven en el backend.
 
-const API_BASE = 'http://localhost:4000/api';
+const API_BASE = 'https://arcade-production-d8c8.up.railway.app/api';
 const GRID_SIZE = 25;
 
 // En producción, este token sale del login real del usuario.
