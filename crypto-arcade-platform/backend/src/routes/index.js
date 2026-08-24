@@ -7,9 +7,8 @@
 
 const express = require('express');
 const minesRoutes = require('../games/mines/mines.routes');
-
+const meRoutes = require('../routes/me.routes');
 const router = express.Router();
-
 router.use('/games/mines', minesRoutes);
-
+router.use('/me', meRoutes);
 module.exports = router;
