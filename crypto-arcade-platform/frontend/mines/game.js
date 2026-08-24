@@ -166,3 +166,16 @@ cashoutBtn.addEventListener('click', cashout);
 
 renderBoard();
 setStatus('Configura tu apuesta y presiona "Iniciar partida".');
+
+async function loadBalance() {
+  try {
+    const res = await fetch(`${API_BASE}/me`, {
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    updateBalance(data.balance);
+  } catch (err) {
+    console.error('No se pudo cargar el balance:', err);
+  }
+}
