@@ -166,6 +166,7 @@ cashoutBtn.addEventListener('click', cashout);
 
 renderBoard();
 setStatus('Configura tu apuesta y presiona "Iniciar partida".');
+loadBalance();
 
 async function loadBalance() {
   try {
