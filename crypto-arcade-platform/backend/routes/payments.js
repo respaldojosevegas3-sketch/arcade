@@ -12,6 +12,7 @@ const rateLimit = require("express-rate-limit");
 const nowpayments = require("../services/nowpayments");
 const pool = require("../db"); // asumiendo que ya tenés un módulo pg Pool exportado como './db'
 const authMiddleware = require("../middleware/auth"); // tu middleware de JWT existente
+const isAdmin = require("../middleware/isAdmin");
 
 const router = express.Router();
 
@@ -194,9 +195,7 @@ router.post("/withdraw/request", authMiddleware, async (req, res) => {
  * SOLO ADMIN. Dispara el payout real en NOWPayments hacia la wallet del usuario.
  * Protegé esta ruta con tu middleware de admin (no incluido acá).
  */
-router.post("/withdraw/:id/approve", authMiddleware, async (req, res) => {
-  // TODO: agregar chequeo real de rol admin, ej: if (!req.user.isAdmin) return res.sendStatus(403);
-
+router.post("/withdraw/:id/approve", authMiddleware, isAdmin, async (req, res) => {
   const { rows } = await pool.query(`SELECT * FROM withdrawals WHERE id = $1`, [req.params.id]);
   const withdrawal = rows[0];
 
@@ -227,7 +226,7 @@ router.post("/withdraw/:id/approve", authMiddleware, async (req, res) => {
  * POST /api/payments/withdraw/:id/reject
  * SOLO ADMIN. Rechaza el retiro y devuelve el saldo al usuario.
  */
-router.post("/withdraw/:id/reject", authMiddleware, async (req, res) => {
+router.post("/withdraw/:id/reject", authMiddleware, isAdmin, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
