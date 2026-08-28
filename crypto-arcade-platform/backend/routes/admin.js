@@ -1,101 +1,92 @@
-// routes/admin.js
+// backend/routes/admin.js
 //
-// Monta este router en tu app.js, protegido por isAdmin:
-//   const adminRouter = require('./routes/admin');
-//   app.use('/api/admin', authMiddleware, isAdmin, adminRouter);
-//
-// (isAdmin y authMiddleware van UNA vez al montar el router entero,
-// así no hace falta repetirlos en cada ruta de este archivo.)
+// Todas las rutas de acá requieren estar logueado Y ser admin.
+// Se aplica una sola vez al montar el router (ver instrucciones de index.js).
 
-const express = require("express");
-const pool = require("../db");
+const express = require('express');
+const { pool } = require('../src/db/pool');
+const { getGameConfig, setGameConfig } = require('../src/redis/client');
 
 const router = express.Router();
 
 /**
  * GET /api/admin/stats
- * Números para la vista de Resumen del panel.
  */
-router.get("/stats", async (req, res) => {
+router.get('/stats', async (req, res) => {
   try {
-    const [{ rows: volumeRows }, { rows: userRows }, { rows: pendingRows }] = await Promise.all([
-      pool.query(
-        `SELECT COALESCE(SUM(amount), 0) AS volume_today
-         FROM bets WHERE created_at >= CURRENT_DATE`
-      ),
-      pool.query(
-        `SELECT COUNT(DISTINCT user_id) AS active_users
-         FROM bets WHERE created_at >= CURRENT_DATE`
-      ),
-      pool.query(`SELECT COUNT(*) AS pending_count FROM withdrawals WHERE status = 'pending'`),
-    ]);
-
-    const volumeToday = Number(volumeRows[0].volume_today);
-
-    const { rows: revenueRows } = await pool.query(
-      `SELECT COALESCE(SUM(amount), 0) - COALESCE(SUM(payout), 0) AS house_revenue
-       FROM bets WHERE created_at >= CURRENT_DATE`
-    );
+    const [{ rows: volumeRows }, { rows: userRows }, { rows: pendingRows }, { rows: revenueRows }] =
+      await Promise.all([
+        pool.query(`SELECT COALESCE(SUM(amount), 0) AS v FROM bets WHERE created_at >= CURRENT_DATE`),
+        pool.query(`SELECT COUNT(DISTINCT user_id) AS c FROM bets WHERE created_at >= CURRENT_DATE`),
+        pool.query(`SELECT COUNT(*) AS c FROM withdrawals WHERE status = 'pending'`),
+        pool.query(
+          `SELECT COALESCE(SUM(amount), 0) - COALESCE(SUM(payout), 0) AS r
+           FROM bets WHERE created_at >= CURRENT_DATE AND status != 'open'`
+        ),
+      ]);
 
     res.json({
-      volumeToday: volumeToday.toFixed(2),
-      houseRevenueToday: Number(revenueRows[0].house_revenue).toFixed(2),
-      activeUsers: Number(userRows[0].active_users),
-      pendingWithdrawals: Number(pendingRows[0].pending_count),
+      volumeToday: Number(volumeRows[0].v).toFixed(2),
+      houseRevenueToday: Number(revenueRows[0].r).toFixed(2),
+      activeUsers: Number(userRows[0].c),
+      pendingWithdrawals: Number(pendingRows[0].c),
     });
   } catch (err) {
-    console.error("Error en /admin/stats:", err);
-    res.status(500).json({ error: "Error al calcular estadísticas." });
+    console.error('[Admin] Error en /stats:', err);
+    res.status(500).json({ error: 'INTERNAL_ERROR' });
   }
 });
 
 /**
- * GET /api/admin/games
- * Devuelve la configuración actual de todos los juegos.
+ * GET /api/admin/games/mines
+ * Lee la config operativa de Mines desde Redis (con fallback a defaults).
  */
-router.get("/games", async (req, res) => {
-  const { rows } = await pool.query(`SELECT * FROM game_configs ORDER BY id`);
-  res.json(rows);
+router.get('/games/mines', async (req, res) => {
+  try {
+    const cfg = await getGameConfig('mines');
+    res.json(cfg);
+  } catch (err) {
+    console.error('[Admin] Error leyendo config de mines:', err);
+    res.status(500).json({ error: 'INTERNAL_ERROR' });
+  }
 });
 
 /**
- * PUT /api/admin/games/:id
- * Actualiza la configuración de un juego (house edge, créditos por ronda, límites, enabled).
+ * PUT /api/admin/games/mines
+ * Actualiza la config operativa de Mines en Redis. Toma efecto
+ * inmediato, sin redeploy — las próximas partidas ya la usan.
  */
-router.put("/games/:id", async (req, res) => {
-  const { id } = req.params;
-  const { enabled, houseEdge, creditsPerRound, minBet, maxBet } = req.body;
+router.put('/games/mines', async (req, res) => {
+  const { houseEdge, minBet, maxBet, minMines, maxMines, maintenanceMode } = req.body;
 
-  const { rows } = await pool.query(
-    `UPDATE game_configs
-     SET enabled = COALESCE($1, enabled),
-         house_edge = COALESCE($2, house_edge),
-         credits_per_round = COALESCE($3, credits_per_round),
-         min_bet = COALESCE($4, min_bet),
-         max_bet = COALESCE($5, max_bet),
-         updated_at = NOW()
-     WHERE id = $6
-     RETURNING *`,
-    [enabled, houseEdge, creditsPerRound, minBet, maxBet, id]
-  );
+  try {
+    const current = await getGameConfig('mines');
+    const updated = {
+      ...current,
+      ...(houseEdge !== undefined && { houseEdge }),
+      ...(minBet !== undefined && { minBet }),
+      ...(maxBet !== undefined && { maxBet }),
+      ...(minMines !== undefined && { minMines }),
+      ...(maxMines !== undefined && { maxMines }),
+      ...(maintenanceMode !== undefined && { maintenanceMode }),
+    };
 
-  if (rows.length === 0) {
-    return res.status(404).json({ error: "Juego no encontrado." });
+    await setGameConfig('mines', updated);
+    res.json(updated);
+  } catch (err) {
+    console.error('[Admin] Error actualizando config de mines:', err);
+    res.status(500).json({ error: 'INTERNAL_ERROR' });
   }
-
-  res.json(rows[0]);
 });
 
 /**
  * GET /api/admin/withdrawals?status=pending
- * Lista de retiros, por defecto solo los pendientes.
  */
-router.get("/withdrawals", async (req, res) => {
-  const status = req.query.status || "pending";
+router.get('/withdrawals', async (req, res) => {
+  const status = req.query.status || 'pending';
 
   const { rows } = await pool.query(
-    `SELECT w.id, w.amount_usd, w.wallet_address, w.status, w.requested_at,
-            u.email AS user_email
+    `SELECT w.id, w.amount_usd, w.wallet_address, w.status, w.requested_at, u.email AS user_email
      FROM withdrawals w
      JOIN users u ON u.id = w.user_id
      WHERE w.status = $1

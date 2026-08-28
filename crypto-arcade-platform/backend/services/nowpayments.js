@@ -1,104 +1,96 @@
-// services/nowpayments.js
+// backend/services/nowpayments.js
 //
-// Envoltorio (wrapper) sobre la API de NOWPayments.
-// Requiere las siguientes variables de entorno en Railway:
+// Envoltorio sobre la API de NOWPayments. Usa fetch nativo (Node 18+),
+// así no hace falta agregar axios como dependencia nueva.
 //
-//   NOWPAYMENTS_API_KEY       -> tu API key del dashboard de NOWPayments
-//   NOWPAYMENTS_IPN_SECRET    -> secreto IPN (Configuración > Herramientas de pago > IPN)
-//   NOWPAYMENTS_BASE_URL      -> https://api.nowpayments.io/v1  (producción)
-//                                https://api-sandbox.nowpayments.io/v1 (sandbox, para probar)
-//   PAYOUT_CURRENCY           -> usdttrc20  (moneda fija de retiro: USDT sobre TRC20)
-//
-// Instalar dependencia si no está: npm install axios
+// Variables de entorno requeridas (ya están en Railway):
+//   NOWPAYMENTS_API_KEY, NOWPAYMENTS_IPN_SECRET,
+//   NOWPAYMENTS_BASE_URL, PAYOUT_CURRENCY, PUBLIC_BACKEND_URL
 
-const axios = require("axios");
-const crypto = require("crypto");
+const crypto = require('crypto');
 
-const BASE_URL = process.env.NOWPAYMENTS_BASE_URL || "https://api.nowpayments.io/v1";
+const BASE_URL = process.env.NOWPAYMENTS_BASE_URL || 'https://api.nowpayments.io/v1';
 const API_KEY = process.env.NOWPAYMENTS_API_KEY;
 
-const client = axios.create({
-  baseURL: BASE_URL,
-  headers: {
-    "x-api-key": API_KEY,
-    "Content-Type": "application/json",
-  },
-  timeout: 15000,
-});
+async function callApi(path, options = {}) {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    ...options,
+    headers: {
+      'x-api-key': API_KEY,
+      'Content-Type': 'application/json',
+      ...(options.headers || {}),
+    },
+  });
+
+  const data = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    const err = new Error(data.message || `NOWPayments error ${res.status}`);
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+
+  return data;
+}
 
 /**
- * Crea un pago (depósito) para que el usuario mande cripto en la moneda que quiera.
- * NOWPayments se encarga de la conversión a tu moneda de liquidación (payCurrency destino).
- *
- * @param {Object} params
- * @param {number} params.priceAmount - Monto en USD que el usuario quiere cargar.
- * @param {string} params.orderId - ID único interno (ej. `deposit_<userId>_<timestamp>`).
- * @param {string} params.ipnCallbackUrl - URL pública de tu webhook, ej. https://tu-backend/api/payments/webhook
+ * Crea un pago de depósito. No fijamos pay_currency a propósito:
+ * así NOWPayments deja que el usuario elija con qué cripto paga.
  */
 async function createDeposit({ priceAmount, orderId, ipnCallbackUrl }) {
-  const { data } = await client.post("/payment", {
-    price_amount: priceAmount,
-    price_currency: "usd",
-    // pay_currency se omite a propósito: así NOWPayments deja que el usuario elija
-    // con qué moneda quiere pagar en la pantalla de pago que él genera.
-    order_id: orderId,
-    ipn_callback_url: ipnCallbackUrl,
+  return callApi('/payment', {
+    method: 'POST',
+    body: JSON.stringify({
+      price_amount: priceAmount,
+      price_currency: 'usd',
+      order_id: orderId,
+      ipn_callback_url: ipnCallbackUrl,
+    }),
   });
-  return data; // incluye payment_id, pay_address, pay_amount, pay_currency, etc.
 }
 
-/**
- * Consulta el estado actual de un pago por su payment_id.
- */
 async function getPaymentStatus(paymentId) {
-  const { data } = await client.get(`/payment/${paymentId}`);
-  return data;
+  return callApi(`/payment/${paymentId}`);
 }
 
 /**
- * Crea un payout (retiro) real hacia la wallet TRC20 del usuario.
- * OJO: en tu flujo esto se dispara solo cuando el admin aprueba manualmente
- * el retiro desde el panel — nunca automático por ahora.
- *
- * @param {Object} params
- * @param {string} params.address - Dirección TRC20 del usuario (ya validada).
- * @param {number} params.amount - Monto en USDT a enviar.
- * @param {string} params.withdrawalId - ID único interno del retiro (para trazabilidad).
+ * Crea un payout real hacia la wallet TRC20 del usuario.
+ * Se dispara SOLO cuando el admin aprueba el retiro manualmente.
  */
 async function createPayout({ address, amount, withdrawalId }) {
-  const { data } = await client.post("/payout", {
-    ipn_callback_url: process.env.PAYOUT_IPN_CALLBACK_URL,
-    withdrawals: [
-      {
-        address,
-        currency: process.env.PAYOUT_CURRENCY || "usdttrc20",
-        amount,
-        unique_external_id: withdrawalId,
-      },
-    ],
+  return callApi('/payout', {
+    method: 'POST',
+    body: JSON.stringify({
+      ipn_callback_url: process.env.PAYOUT_IPN_CALLBACK_URL || undefined,
+      withdrawals: [
+        {
+          address,
+          currency: process.env.PAYOUT_CURRENCY || 'usdttrc20',
+          amount,
+          unique_external_id: withdrawalId,
+        },
+      ],
+    }),
   });
-  return data;
 }
 
 /**
- * Verifica que un webhook (IPN) realmente venga de NOWPayments,
- * usando el header `x-nowpayments-sig` y el NOWPAYMENTS_IPN_SECRET.
- * El body debe pasarse tal cual llegó (sin reordenar), como string u objeto.
+ * Verifica que un webhook (IPN) venga realmente de NOWPayments.
  */
 function verifyIpnSignature(rawBody, signatureHeader) {
   const secret = process.env.NOWPAYMENTS_IPN_SECRET;
   if (!secret || !signatureHeader) return false;
 
-  // NOWPayments firma el JSON con las claves ordenadas alfabéticamente.
   const sortedBody = JSON.stringify(sortObjectKeys(rawBody));
-  const hmac = crypto.createHmac("sha512", secret).update(sortedBody).digest("hex");
+  const hmac = crypto.createHmac('sha512', secret).update(sortedBody).digest('hex');
 
   return hmac === signatureHeader;
 }
 
 function sortObjectKeys(obj) {
   if (Array.isArray(obj)) return obj.map(sortObjectKeys);
-  if (obj !== null && typeof obj === "object") {
+  if (obj !== null && typeof obj === 'object') {
     return Object.keys(obj)
       .sort()
       .reduce((acc, key) => {
@@ -109,9 +101,4 @@ function sortObjectKeys(obj) {
   return obj;
 }
 
-module.exports = {
-  createDeposit,
-  getPaymentStatus,
-  createPayout,
-  verifyIpnSignature,
-};
+module.exports = { createDeposit, getPaymentStatus, createPayout, verifyIpnSignature };

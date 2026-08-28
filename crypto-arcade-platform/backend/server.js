@@ -10,6 +10,10 @@ const app = express();
 
 app.use(helmet());
 app.use(cors());
+
+// El webhook de NOWPayments necesita el body SIN parsear para poder
+// verificar su firma — por eso este parser va ANTES del express.json() global.
+app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
 
 // Rate limit básico anti-abuso en endpoints de juego (ajustar en prod).

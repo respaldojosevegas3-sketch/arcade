@@ -1,44 +1,37 @@
-// routes/payments.js
+// backend/routes/payments.js
 //
-// Monta este router en tu app.js / index.js principal, por ejemplo:
-//   const paymentsRouter = require('./routes/payments');
-//   app.use('/api/payments', paymentsRouter);
-//
-// IMPORTANTE: el webhook necesita el body RAW (sin parsear como JSON todavía)
-// para que la verificación de firma funcione. Ver nota en la ruta /webhook.
+// Ajustado al sistema real: requireAuth deja req.userId (no req.user),
+// el saldo vive en users.balance_usdt (dólares reales, no "créditos"
+// separados), y las operaciones de saldo van todas por ledger_entries
+// para mantener el mismo patrón que ya usa mines.service.js.
 
-const express = require("express");
-const rateLimit = require("express-rate-limit");
-const nowpayments = require("../services/nowpayments");
-const pool = require("../db"); // asumiendo que ya tenés un módulo pg Pool exportado como './db'
-const authMiddleware = require("../middleware/auth"); // tu middleware de JWT existente
-const isAdmin = require("../middleware/isAdmin");
+const express = require('express');
+const rateLimit = require('express-rate-limit');
+const { pool, withTransaction } = require('../src/db/pool');
+const { requireAuth } = require('../src/middlewares/auth.middleware');
+const { isAdmin } = require('../src/middlewares/isAdmin');
+const nowpayments = require('../services/nowpayments');
 
 const router = express.Router();
 
-const depositLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10, // máximo 10 intentos de depósito cada 15 min por IP
-});
+const depositLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10 });
 
-// ---------- Regex simple de validación de dirección TRC20 ----------
-// Direcciones Tron empiezan con "T" y tienen 34 caracteres alfanuméricos.
 const TRC20_REGEX = /^T[a-zA-Z0-9]{33}$/;
 
 /**
  * POST /api/payments/wallet
- * Guarda o actualiza la wallet TRC20 del usuario logueado (para recibir retiros).
+ * Guarda/actualiza la wallet TRC20 del usuario logueado.
  */
-router.post("/wallet", authMiddleware, async (req, res) => {
+router.post('/wallet', requireAuth, async (req, res) => {
   const { walletAddress } = req.body;
 
   if (!walletAddress || !TRC20_REGEX.test(walletAddress)) {
-    return res.status(400).json({ error: "Dirección TRC20 inválida." });
+    return res.status(400).json({ error: 'INVALID_WALLET_ADDRESS' });
   }
 
   await pool.query(
     `UPDATE users SET wallet_address = $1, wallet_network = 'TRC20' WHERE id = $2`,
-    [walletAddress, req.user.id]
+    [walletAddress, req.userId]
   );
 
   res.json({ ok: true });
@@ -46,17 +39,16 @@ router.post("/wallet", authMiddleware, async (req, res) => {
 
 /**
  * POST /api/payments/deposit
- * Crea una solicitud de depósito. El usuario indica cuánto quiere cargar en USD;
- * NOWPayments genera la dirección/QR para que pague en la cripto que prefiera.
+ * Crea la solicitud de depósito en NOWPayments (cualquier moneda).
  */
-router.post("/deposit", authMiddleware, depositLimiter, async (req, res) => {
+router.post('/deposit', requireAuth, depositLimiter, async (req, res) => {
   const { amountUsd } = req.body;
 
   if (!amountUsd || amountUsd <= 0) {
-    return res.status(400).json({ error: "Monto inválido." });
+    return res.status(400).json({ error: 'INVALID_AMOUNT' });
   }
 
-  const orderId = `deposit_${req.user.id}_${Date.now()}`;
+  const orderId = `deposit_${req.userId}_${Date.now()}`;
 
   try {
     const payment = await nowpayments.createDeposit({
@@ -65,11 +57,10 @@ router.post("/deposit", authMiddleware, depositLimiter, async (req, res) => {
       ipnCallbackUrl: `${process.env.PUBLIC_BACKEND_URL}/api/payments/webhook`,
     });
 
-    // Guardamos el depósito como "pendiente" hasta que llegue el webhook confirmando.
     await pool.query(
-      `INSERT INTO deposits (order_id, user_id, amount_usd, payment_id, status, created_at)
-       VALUES ($1, $2, $3, $4, 'pending', NOW())`,
-      [orderId, req.user.id, amountUsd, payment.payment_id]
+      `INSERT INTO deposits (order_id, user_id, amount_usd, payment_id, status)
+       VALUES ($1, $2, $3, $4, 'pending')`,
+      [orderId, req.userId, amountUsd, payment.payment_id]
     );
 
     res.json({
@@ -79,134 +70,138 @@ router.post("/deposit", authMiddleware, depositLimiter, async (req, res) => {
       payCurrency: payment.pay_currency,
     });
   } catch (err) {
-    console.error("Error creando depósito NOWPayments:", err.response?.data || err.message);
-    res.status(502).json({ error: "No se pudo crear el depósito. Intenta de nuevo." });
+    console.error('[Payments] Error creando depósito:', err.data || err.message);
+    res.status(502).json({ error: 'DEPOSIT_CREATION_FAILED' });
   }
 });
 
 /**
  * POST /api/payments/webhook
- * NOWPayments llama a esta ruta cuando el estado de un pago cambia.
- * Acá es donde se acredita el saldo en créditos al usuario, una sola vez.
+ * NOWPayments notifica acá los cambios de estado. Acredita balance_usdt
+ * directo (sin conversión a créditos: eso es solo visual en el frontend).
  *
- * NOTA: para que la verificación de firma funcione, esta ruta necesita el
- * body RAW. En tu app.js, antes de app.use(express.json()) global, agregá:
- *
- *   app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
- *
- * y en esta ruta parseás vos mismo con JSON.parse(req.body.toString()).
+ * IMPORTANTE: necesita el body RAW. Ver instrucciones para server.js.
  */
-router.post("/webhook", async (req, res) => {
+router.post('/webhook', async (req, res) => {
   let payload;
   try {
     payload = JSON.parse(req.body.toString());
   } catch {
-    return res.status(400).send("Body inválido");
+    return res.status(400).send('Body inválido');
   }
 
-  const signature = req.headers["x-nowpayments-sig"];
-  const isValid = nowpayments.verifyIpnSignature(payload, signature);
-
-  if (!isValid) {
-    return res.status(401).send("Firma inválida");
+  const signature = req.headers['x-nowpayments-sig'];
+  if (!nowpayments.verifyIpnSignature(payload, signature)) {
+    return res.status(401).send('Firma inválida');
   }
 
   const { order_id, payment_status, price_amount } = payload;
 
-  // Solo acreditamos cuando el pago está totalmente confirmado.
-  if (payment_status === "finished" || payment_status === "confirmed") {
-    const client = await pool.connect();
+  if (payment_status === 'finished' || payment_status === 'confirmed') {
     try {
-      await client.query("BEGIN");
+      await withTransaction(async (client) => {
+        const { rows } = await client.query(
+          `SELECT * FROM deposits WHERE order_id = $1 AND status != 'completed' FOR UPDATE`,
+          [order_id]
+        );
+        if (rows.length === 0) return; // ya procesado o no existe
 
-      const { rows } = await client.query(
-        `SELECT * FROM deposits WHERE order_id = $1 AND status != 'completed' FOR UPDATE`,
-        [order_id]
-      );
-
-      if (rows.length > 0) {
         const deposit = rows[0];
-        const credits = Math.round(Number(price_amount) * 1000); // $1 = 1000 créditos
+        const amount = Number(price_amount);
 
         await client.query(
-          `UPDATE users SET credits_balance = credits_balance + $1 WHERE id = $2`,
-          [credits, deposit.user_id]
+          `UPDATE users SET balance_usdt = balance_usdt + $1 WHERE id = $2`,
+          [amount, deposit.user_id]
         );
 
         await client.query(
           `UPDATE deposits SET status = 'completed', completed_at = NOW() WHERE order_id = $1`,
           [order_id]
         );
-      }
 
-      await client.query("COMMIT");
+        await client.query(
+          `INSERT INTO ledger_entries (user_id, type, amount, ref_id) VALUES ($1, 'deposit', $2, $3)`,
+          [deposit.user_id, amount, order_id]
+        );
+      });
     } catch (err) {
-      await client.query("ROLLBACK");
-      console.error("Error procesando webhook de depósito:", err);
-      return res.status(500).send("Error interno");
-    } finally {
-      client.release();
+      console.error('[Payments] Error procesando webhook:', err);
+      return res.status(500).send('Error interno');
     }
   }
 
-  res.status(200).send("OK");
+  res.status(200).send('OK');
 });
 
 /**
  * POST /api/payments/withdraw/request
- * El usuario solicita un retiro. Queda en estado "pending" hasta que
- * el admin lo apruebe manualmente desde el panel (nunca automático).
+ * El usuario pide un retiro. Se descuenta el saldo al pedirlo (para que
+ * no se pueda gastar dos veces mientras se revisa). Queda pendiente
+ * hasta que un admin lo apruebe manualmente.
  */
-router.post("/withdraw/request", authMiddleware, async (req, res) => {
+router.post('/withdraw/request', requireAuth, async (req, res) => {
   const { amountUsd } = req.body;
 
-  const { rows } = await pool.query(
-    `SELECT wallet_address, credits_balance FROM users WHERE id = $1`,
-    [req.user.id]
-  );
-  const user = rows[0];
-
-  if (!user?.wallet_address) {
-    return res.status(400).json({ error: "Primero configura tu wallet TRC20 en tu perfil." });
+  if (!amountUsd || amountUsd <= 0) {
+    return res.status(400).json({ error: 'INVALID_AMOUNT' });
   }
 
-  const creditsNeeded = Math.round(amountUsd * 1000);
-  if (creditsNeeded > user.credits_balance) {
-    return res.status(400).json({ error: "Saldo insuficiente." });
+  try {
+    await withTransaction(async (client) => {
+      const { rows } = await client.query(
+        `SELECT wallet_address, balance_usdt FROM users WHERE id = $1 FOR UPDATE`,
+        [req.userId]
+      );
+      const user = rows[0];
+
+      if (!user?.wallet_address) {
+        throw Object.assign(new Error('NO_WALLET'), { status: 400 });
+      }
+      if (Number(user.balance_usdt) < amountUsd) {
+        throw Object.assign(new Error('INSUFFICIENT_BALANCE'), { status: 400 });
+      }
+
+      await client.query(
+        `UPDATE users SET balance_usdt = balance_usdt - $1 WHERE id = $2`,
+        [amountUsd, req.userId]
+      );
+
+      await client.query(
+        `INSERT INTO withdrawals (user_id, amount_usd, wallet_address, status)
+         VALUES ($1, $2, $3, 'pending')`,
+        [req.userId, amountUsd, user.wallet_address]
+      );
+
+      await client.query(
+        `INSERT INTO ledger_entries (user_id, type, amount, ref_id) VALUES ($1, 'withdrawal_request', $2, NULL)`,
+        [req.userId, amountUsd]
+      );
+    });
+
+    res.json({ ok: true, message: 'Retiro solicitado. Será revisado por el equipo.' });
+  } catch (err) {
+    if (err.status === 400) return res.status(400).json({ error: err.message });
+    console.error('[Payments] Error solicitando retiro:', err);
+    res.status(500).json({ error: 'INTERNAL_ERROR' });
   }
-
-  await pool.query(
-    `INSERT INTO withdrawals (user_id, amount_usd, wallet_address, status, requested_at)
-     VALUES ($1, $2, $3, 'pending', NOW())`,
-    [req.user.id, amountUsd, user.wallet_address]
-  );
-
-  // Se descuenta el saldo al solicitar, para que no lo pueda gastar mientras espera aprobación.
-  await pool.query(
-    `UPDATE users SET credits_balance = credits_balance - $1 WHERE id = $2`,
-    [creditsNeeded, req.user.id]
-  );
-
-  res.json({ ok: true, message: "Retiro solicitado. Será revisado por el equipo." });
 });
 
 /**
- * POST /api/payments/withdraw/:id/approve
- * SOLO ADMIN. Dispara el payout real en NOWPayments hacia la wallet del usuario.
- * Protegé esta ruta con tu middleware de admin (no incluido acá).
+ * POST /api/payments/withdraw/:id/approve   (solo admin)
+ * Dispara el payout real en NOWPayments.
  */
-router.post("/withdraw/:id/approve", authMiddleware, isAdmin, async (req, res) => {
+router.post('/withdraw/:id/approve', requireAuth, isAdmin, async (req, res) => {
   const { rows } = await pool.query(`SELECT * FROM withdrawals WHERE id = $1`, [req.params.id]);
   const withdrawal = rows[0];
 
-  if (!withdrawal || withdrawal.status !== "pending") {
-    return res.status(404).json({ error: "Retiro no encontrado o ya procesado." });
+  if (!withdrawal || withdrawal.status !== 'pending') {
+    return res.status(404).json({ error: 'WITHDRAWAL_NOT_FOUND_OR_PROCESSED' });
   }
 
   try {
     const payout = await nowpayments.createPayout({
       address: withdrawal.wallet_address,
-      amount: withdrawal.amount_usd,
+      amount: Number(withdrawal.amount_usd),
       withdrawalId: `withdrawal_${withdrawal.id}`,
     });
 
@@ -217,47 +212,44 @@ router.post("/withdraw/:id/approve", authMiddleware, isAdmin, async (req, res) =
 
     res.json({ ok: true, payout });
   } catch (err) {
-    console.error("Error creando payout:", err.response?.data || err.message);
-    res.status(502).json({ error: "No se pudo procesar el payout." });
+    console.error('[Payments] Error creando payout:', err.data || err.message);
+    res.status(502).json({ error: 'PAYOUT_FAILED' });
   }
 });
 
 /**
- * POST /api/payments/withdraw/:id/reject
- * SOLO ADMIN. Rechaza el retiro y devuelve el saldo al usuario.
+ * POST /api/payments/withdraw/:id/reject   (solo admin)
+ * Rechaza y devuelve el saldo al usuario.
  */
-router.post("/withdraw/:id/reject", authMiddleware, isAdmin, async (req, res) => {
-  const client = await pool.connect();
+router.post('/withdraw/:id/reject', requireAuth, isAdmin, async (req, res) => {
   try {
-    await client.query("BEGIN");
+    await withTransaction(async (client) => {
+      const { rows } = await client.query(
+        `SELECT * FROM withdrawals WHERE id = $1 FOR UPDATE`,
+        [req.params.id]
+      );
+      const withdrawal = rows[0];
 
-    const { rows } = await client.query(
-      `SELECT * FROM withdrawals WHERE id = $1 FOR UPDATE`,
-      [req.params.id]
-    );
-    const withdrawal = rows[0];
+      if (!withdrawal || withdrawal.status !== 'pending') {
+        throw Object.assign(new Error('WITHDRAWAL_NOT_FOUND_OR_PROCESSED'), { status: 404 });
+      }
 
-    if (!withdrawal || withdrawal.status !== "pending") {
-      await client.query("ROLLBACK");
-      return res.status(404).json({ error: "Retiro no encontrado o ya procesado." });
-    }
+      await client.query(
+        `UPDATE users SET balance_usdt = balance_usdt + $1 WHERE id = $2`,
+        [withdrawal.amount_usd, withdrawal.user_id]
+      );
+      await client.query(`UPDATE withdrawals SET status = 'rejected' WHERE id = $1`, [req.params.id]);
+      await client.query(
+        `INSERT INTO ledger_entries (user_id, type, amount, ref_id) VALUES ($1, 'withdrawal_rejected_refund', $2, $3)`,
+        [withdrawal.user_id, withdrawal.amount_usd, req.params.id]
+      );
+    });
 
-    const creditsToRefund = Math.round(Number(withdrawal.amount_usd) * 1000);
-
-    await client.query(
-      `UPDATE users SET credits_balance = credits_balance + $1 WHERE id = $2`,
-      [creditsToRefund, withdrawal.user_id]
-    );
-    await client.query(`UPDATE withdrawals SET status = 'rejected' WHERE id = $1`, [req.params.id]);
-
-    await client.query("COMMIT");
     res.json({ ok: true });
   } catch (err) {
-    await client.query("ROLLBACK");
-    console.error("Error rechazando retiro:", err);
-    res.status(500).json({ error: "Error interno." });
-  } finally {
-    client.release();
+    if (err.status === 404) return res.status(404).json({ error: err.message });
+    console.error('[Payments] Error rechazando retiro:', err);
+    res.status(500).json({ error: 'INTERNAL_ERROR' });
   }
 });
 
