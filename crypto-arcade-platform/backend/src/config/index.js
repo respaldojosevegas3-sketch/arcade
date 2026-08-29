@@ -48,5 +48,44 @@ module.exports = {
       maxBet: 500, // en USDT
       maintenanceMode: false,
     },
+
+    // Frutas: tragamonedas de 3 carretes. Todo esto es editable en caliente
+    // desde el Backoffice (vía config:games:frutas en Redis), igual que
+    // Mines. El pozo del jackpot NO vive acá: vive aparte, en
+    // jackpot:frutas:pool (ver src/redis/jackpot.js), porque es un
+    // contador que crece solo, no un parámetro que se setea a mano.
+    frutas: {
+      minBet: 0.15, // 150 créditos a $0.001 = $0.15
+      maxBet: 50,
+      maintenanceMode: false,
+
+      // Probabilidad de cada símbolo por carrete (deben sumar 1). El 1%
+      // de SEVEN da una probabilidad de jackpot de 0.01^3 = 1 en 1,000,000,
+      // tal como se definió.
+      weights: {
+        LEMON: 0.40,
+        CHERRY: 0.28,
+        BELL: 0.16,
+        GEM: 0.09,
+        STAR: 0.06,
+        SEVEN: 0.01,
+      },
+
+      // Multiplicadores sobre la apuesta. "pair" = 2 iguales consecutivos
+      // desde la izquierda, "triple" = 3 iguales (o comodín completando).
+      // SEVEN no tiene multiplicador fijo: su triple dispara el jackpot.
+      paytable: {
+        LEMON: { pair: 1, triple: 2 },
+        CHERRY: { pair: 1.5, triple: 3 },
+        BELL: { pair: 3, triple: 6 },
+        GEM: { pair: 7, triple: 15 },
+        STAR: { triple: 30 },
+      },
+
+      jackpot: {
+        contributionPct: 0.02, // 2% de cada apuesta va al pozo
+        floor: 50, // piso en USDT: nunca se paga, queda sembrado para el próximo pozo
+      },
+    },
   },
 };
