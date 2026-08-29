@@ -88,12 +88,21 @@ async function creditPayout({ userId, sessionId, payoutAmount }) {
  */
 async function settleAsLoss({ sessionId }) {
   return withTransaction(async (client) => {
-    await client.query(
+    const bet = await client.query(
       `UPDATE bets
          SET status = 'lost', payout = 0, closed_at = NOW()
-       WHERE session_id = $1 AND status = 'open'`,
+       WHERE session_id = $1 AND status = 'open'
+       RETURNING user_id`,
       [sessionId]
     );
+
+    if (bet.rows.length === 0) return null;
+
+    const { rows } = await client.query(
+      `SELECT balance_usdt FROM users WHERE id = $1`,
+      [bet.rows[0].user_id]
+    );
+    return rows[0]?.balance_usdt ?? null;
   });
 }
 
