@@ -6,6 +6,7 @@
 const express = require('express');
 const { pool } = require('../src/db/pool');
 const { getGameConfig, setGameConfig } = require('../src/redis/client');
+const { getJackpotPool } = require('../src/redis/jackpot');
 
 const router = express.Router();
 
@@ -75,6 +76,66 @@ router.put('/games/mines', async (req, res) => {
     res.json(updated);
   } catch (err) {
     console.error('[Admin] Error actualizando config de mines:', err);
+    res.status(500).json({ error: 'INTERNAL_ERROR' });
+  }
+});
+
+/**
+ * GET /api/admin/games/frutas
+ * Lee la config operativa de Frutas desde Redis (con fallback a defaults).
+ */
+router.get('/games/frutas', async (req, res) => {
+  try {
+    const cfg = await getGameConfig('frutas');
+    res.json(cfg);
+  } catch (err) {
+    console.error('[Admin] Error leyendo config de frutas:', err);
+    res.status(500).json({ error: 'INTERNAL_ERROR' });
+  }
+});
+
+/**
+ * PUT /api/admin/games/frutas
+ * Actualiza la config operativa de Frutas en Redis. Toma efecto inmediato.
+ * Acepta actualizaciones parciales de weights/paytable/jackpot (merge por
+ * campo, no reemplazo total) para que se pueda subir solo el houseEdge de
+ * un símbolo o solo el piso del jackpot sin tener que reenviar todo.
+ */
+router.put('/games/frutas', async (req, res) => {
+  const { minBet, maxBet, maintenanceMode, weights, paytable, jackpot } = req.body;
+
+  try {
+    const current = await getGameConfig('frutas');
+    const updated = {
+      ...current,
+      ...(minBet !== undefined && { minBet }),
+      ...(maxBet !== undefined && { maxBet }),
+      ...(maintenanceMode !== undefined && { maintenanceMode }),
+      weights: weights ? { ...current.weights, ...weights } : current.weights,
+      paytable: paytable ? { ...current.paytable, ...paytable } : current.paytable,
+      jackpot: jackpot ? { ...current.jackpot, ...jackpot } : current.jackpot,
+    };
+
+    await setGameConfig('frutas', updated);
+    res.json(updated);
+  } catch (err) {
+    console.error('[Admin] Error actualizando config de frutas:', err);
+    res.status(500).json({ error: 'INTERNAL_ERROR' });
+  }
+});
+
+/**
+ * GET /api/admin/games/frutas/jackpot
+ * Solo lectura: cuánto hay acumulado en el pozo AHORA MISMO. No se edita
+ * a mano — crece solo con cada tirada y se resetea solo al pagarse.
+ */
+router.get('/games/frutas/jackpot', async (req, res) => {
+  try {
+    const cfg = await getGameConfig('frutas');
+    const pool = await getJackpotPool(cfg.jackpot.floor);
+    res.json({ pool, floor: cfg.jackpot.floor, payoutIfWonNow: Math.max(0, pool - cfg.jackpot.floor) });
+  } catch (err) {
+    console.error('[Admin] Error leyendo pozo de frutas:', err);
     res.status(500).json({ error: 'INTERNAL_ERROR' });
   }
 });
