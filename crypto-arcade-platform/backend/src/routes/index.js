@@ -7,6 +7,7 @@
 
 const express = require('express');
 const minesRoutes = require('../games/mines/mines.routes');
+const frutasRoutes = require('../games/frutas/frutas.routes');
 const meRoutes = require('../routes/me.routes');
 const authRoutes = require('../routes/auth.routes');
 const paymentsRoutes = require('../../routes/payments');
@@ -16,6 +17,7 @@ const { isAdmin } = require('../middlewares/isAdmin');
 
 const router = express.Router();
 router.use('/games/mines', minesRoutes);
+router.use('/games/frutas', frutasRoutes);
 router.use('/me', meRoutes);
 router.use('/auth', authRoutes);
 router.use('/payments', paymentsRoutes);
