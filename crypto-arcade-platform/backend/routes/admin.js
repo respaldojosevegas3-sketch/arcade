@@ -141,6 +141,46 @@ router.get('/games/frutas/jackpot', async (req, res) => {
 });
 
 /**
+ * POST /api/admin/users/credit
+ * Acredita saldo manualmente a un usuario por email. Pensado para cargar
+ * saldo de prueba durante desarrollo, o para ajustes manuales puntuales
+ * (ej. compensar un error). Queda registrado en el ledger igual que
+ * cualquier otro movimiento, para no perder trazabilidad contable.
+ */
+router.post('/users/credit', async (req, res) => {
+  const { email, amount } = req.body;
+
+  if (!email || typeof amount !== 'number' || amount <= 0) {
+    return res.status(400).json({ error: 'INVALID_PAYLOAD' });
+  }
+
+  try {
+    const { rows } = await pool.query(
+      `UPDATE users
+         SET balance_usdt = balance_usdt + $1
+       WHERE email = $2
+       RETURNING id, email, balance_usdt`,
+      [amount, email]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'USER_NOT_FOUND' });
+    }
+
+    await pool.query(
+      `INSERT INTO ledger_entries (user_id, type, amount, ref_id)
+       VALUES ($1, 'deposit', $2, 'manual_admin_credit')`,
+      [rows[0].id, amount]
+    );
+
+    res.json({ email: rows[0].email, newBalance: rows[0].balance_usdt });
+  } catch (err) {
+    console.error('[Admin] Error acreditando saldo:', err);
+    res.status(500).json({ error: 'INTERNAL_ERROR' });
+  }
+});
+
+/**
  * GET /api/admin/withdrawals?status=pending
  */
 router.get('/withdrawals', async (req, res) => {
