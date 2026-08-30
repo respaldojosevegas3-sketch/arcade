@@ -35,4 +35,14 @@ function handleError(res, err) {
   return res.status(500).json({ error: 'INTERNAL_ERROR' });
 }
 
-module.exports = { spin };
+async function jackpot(req, res) {
+  try {
+    const data = await frutasService.getJackpotInfo();
+    return res.status(200).json(data);
+  } catch (err) {
+    console.error('[Frutas] Error leyendo jackpot:', err);
+    return res.status(500).json({ error: 'INTERNAL_ERROR' });
+  }
+}
+
+module.exports = { spin, jackpot };
