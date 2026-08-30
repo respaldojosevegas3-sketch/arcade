@@ -1,0 +1,9 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "arcade-frutas-frontend",
+  "compatibility_date": "2026-08-22",
+  "assets": {
+    "directory": "./",
+    "not_found_handling": "404-page"
+  }
+}
