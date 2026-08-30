@@ -77,4 +77,13 @@ async function spin({ userId, betAmount }) {
   };
 }
 
-module.exports = { spin, GameError };
+async function getJackpotInfo() {
+  const cfg = await getGameConfig('frutas');
+  const pool = await getJackpotPool(cfg.jackpot.floor);
+  return {
+    pool,
+    potentialWin: Number(Math.max(0, pool - cfg.jackpot.floor).toFixed(2)),
+  };
+}
+
+module.exports = { spin, getJackpotInfo, GameError };
