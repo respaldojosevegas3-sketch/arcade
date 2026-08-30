@@ -77,23 +77,38 @@ function startSpinAnimation() {
     el.classList.remove('win');
   });
 
-  // Mientras esperamos la respuesta real del servidor, mostramos símbolos
-  // random SOLO como animación visual — no tienen relación con el resultado.
+  const keys = Object.keys(SYMBOL_EMOJI);
   const interval = setInterval(() => {
     reelEls.forEach((el) => {
-      const keys = Object.keys(SYMBOL_EMOJI);
-      el.textContent = SYMBOL_EMOJI[keys[Math.floor(Math.random() * keys.length)]];
+      if (el.classList.contains('spinning')) {
+        el.textContent = SYMBOL_EMOJI[keys[Math.floor(Math.random() * keys.length)]];
+      }
     });
-  }, 80);
+  }, 70);
 
   return () => clearInterval(interval);
 }
 
-function showFinalReels(reels) {
-  reelEls.forEach((el, i) => {
-    el.classList.remove('spinning');
-    el.textContent = SYMBOL_EMOJI[reels[i]];
-  });
+/**
+ * Para los carretes UNO POR UNO, de izquierda a derecha, con pausas
+ * crecientes entre cada parada — es lo que genera la expectativa de una
+ * tragamonedas real, en vez de mostrar el resultado todo junto de golpe.
+ */
+function stopReelsSequentially(reels) {
+  const STOP_DELAYS = [2100, 2900, 3900]; // ms desde que arrancó el giro
+
+  return Promise.all(
+    reels.map(
+      (symbol, i) =>
+        new Promise((resolve) => {
+          setTimeout(() => {
+            reelEls[i].classList.remove('spinning');
+            reelEls[i].textContent = SYMBOL_EMOJI[symbol];
+            resolve();
+          }, STOP_DELAYS[i]);
+        })
+    )
+  );
 }
 
 function highlightWin(count) {
@@ -116,18 +131,15 @@ async function spin() {
   setResult('');
   const stopAnimation = startSpinAnimation();
 
-  // Duración mínima de la animación para que no se sienta instantáneo,
-  // aunque el backend responda muy rápido.
-  const minDelay = new Promise((resolve) => setTimeout(resolve, 900));
-
+  // El pedido al servidor y la animación corren en paralelo. Como la
+  // animación (carretes parando de a uno) dura ~2.9s y el request suele
+  // tardar mucho menos, el resultado real ya está esperando cuando el
+  // último carrete para — así nunca se siente que "trabamos" el giro.
   try {
-    const [data] = await Promise.all([
-      apiCall('/games/frutas/spin', { betAmount }),
-      minDelay,
-    ]);
+    const data = await apiCall('/games/frutas/spin', { betAmount });
 
+    await stopReelsSequentially(data.reels);
     stopAnimation();
-    showFinalReels(data.reels);
     updateJackpot(data.jackpotPool, data.jackpotWon);
 
     if (data.jackpotWon) {
