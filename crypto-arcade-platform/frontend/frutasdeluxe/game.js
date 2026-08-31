@@ -1,8 +1,6 @@
-// frontend/frutasdeluxe/game.js
-// Igual principio que frutas/game.js: el cliente nunca calcula nada,
-// solo envía la apuesta y pinta lo que el servidor responde. 5 carretes
-// en vez de 3, y el jackpot queda "pendiente de revisión" en vez de
-// acreditarse solo.
+// frontend/frutas/game.js
+// Igual que Mines: el cliente NUNCA calcula multiplicadores ni sabe qué va
+// a salir. Solo envía la apuesta y pinta lo que el servidor responde.
 
 const API_BASE = 'https://arcade-production-d8c8.up.railway.app/api';
 
@@ -17,7 +15,11 @@ const SYMBOL_EMOJI = {
 
 let authToken = localStorage.getItem('demo_token') || 'DEV_TOKEN_PLACEHOLDER';
 
-const reelEls = [0, 1, 2, 3, 4].map((i) => document.getElementById(`reel${i}`));
+const reelEls = [
+  document.getElementById('reel0'),
+  document.getElementById('reel1'),
+  document.getElementById('reel2'),
+];
 const balanceEl = document.getElementById('balanceValue');
 const jackpotEl = document.getElementById('jackpotValue');
 const resultEl = document.getElementById('resultMsg');
@@ -26,16 +28,21 @@ const betInput = document.getElementById('betAmount');
 const muteBtn = document.getElementById('muteBtn');
 
 let spinning = false;
+let currentBalance = null;
 
 // ============================================================
-// SONIDO — mismo sistema que Frutas normal, generado en el momento.
+// SONIDO — generado en el momento con Web Audio API, sin archivos
+// externos. Todo vive acá adentro para no depender de nada más.
 // ============================================================
 const sound = (() => {
   let ctx = null;
-  let muted = localStorage.getItem('frutasdeluxe_muted') === 'true';
+  let muted = localStorage.getItem('frutas_muted') === 'true';
   let spinLoopStop = null;
 
   function getCtx() {
+    // El navegador exige un gesto del usuario (click) antes de crear el
+    // AudioContext — por eso se crea recién acá, en el primer click, y
+    // no al cargar la página.
     if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
     return ctx;
   }
@@ -47,7 +54,9 @@ const sound = (() => {
     const gain = c.createGain();
     osc.type = type;
     osc.frequency.setValueAtTime(freq, c.currentTime + delay);
-    if (endFreq) osc.frequency.exponentialRampToValueAtTime(endFreq, c.currentTime + delay + duration);
+    if (endFreq) {
+      osc.frequency.exponentialRampToValueAtTime(endFreq, c.currentTime + delay + duration);
+    }
     gain.gain.setValueAtTime(volume, c.currentTime + delay);
     gain.gain.exponentialRampToValueAtTime(0.0001, c.currentTime + delay + duration);
     osc.connect(gain).connect(c.destination);
@@ -55,17 +64,19 @@ const sound = (() => {
     osc.stop(c.currentTime + delay + duration + 0.05);
   }
 
+  // Zumbido continuo mientras giran los carretes, tipo motor de máquina.
   function startSpinLoop() {
     if (muted) { spinLoopStop = () => {}; return; }
     const c = getCtx();
     const osc = c.createOscillator();
     const gain = c.createGain();
     osc.type = 'sawtooth';
-    osc.frequency.value = 95;
+    osc.frequency.value = 90;
     gain.gain.value = 0.035;
     osc.connect(gain).connect(c.destination);
     osc.start();
 
+    // leve vibrato para que no suene como un tono plano y molesto
     const lfo = c.createOscillator();
     const lfoGain = c.createGain();
     lfo.frequency.value = 7;
@@ -78,34 +89,45 @@ const sound = (() => {
       setTimeout(() => { osc.stop(); lfo.stop(); }, 200);
     };
   }
-  function stopSpinLoop() { if (spinLoopStop) { spinLoopStop(); spinLoopStop = null; } }
 
-  function reelStop() { tone({ freq: 240, duration: 0.08, type: 'square', volume: 0.12 }); }
+  function stopSpinLoop() {
+    if (spinLoopStop) { spinLoopStop(); spinLoopStop = null; }
+  }
 
+  // Tick seco cuando un carrete individual se frena.
+  function reelStop() {
+    tone({ freq: 220, duration: 0.08, type: 'square', volume: 0.12 });
+  }
+
+  // "Cha-ching" de dinero: par de campanitas ascendentes, cortas y alegres.
   function win() {
     tone({ freq: 660, duration: 0.12, type: 'triangle', volume: 0.18, delay: 0 });
     tone({ freq: 880, duration: 0.14, type: 'triangle', volume: 0.18, delay: 0.1 });
     tone({ freq: 1175, duration: 0.18, type: 'triangle', volume: 0.16, delay: 0.2 });
   }
 
-  function bigWin() {
-    // Para 5 iguales / Estrella grande: un escalón más largo que "win" normal.
-    [523, 659, 784, 1047].forEach((freq, i) => {
-      tone({ freq, duration: 0.2, type: 'triangle', volume: 0.2, delay: i * 0.11 });
-    });
-  }
-
+  // Sonido propio y más grande del jackpot: una fanfarria de varias notas
+  // en escalera, bien distinta del sonido de ganar normal.
   function jackpot() {
-    const notes = [523, 659, 784, 1047, 1319, 1568, 1976];
-    notes.forEach((freq, i) => tone({ freq, duration: 0.3, type: 'triangle', volume: 0.22, delay: i * 0.12 }));
-    tone({ freq: 110, duration: 1.8, type: 'sawtooth', volume: 0.09, delay: 0 });
+    const notes = [523, 659, 784, 1047, 1319, 1568];
+    notes.forEach((freq, i) => {
+      tone({ freq, duration: 0.28, type: 'triangle', volume: 0.22, delay: i * 0.13 });
+    });
+    // capa grave de fondo para darle "peso"
+    tone({ freq: 130, duration: 1.4, type: 'sawtooth', volume: 0.08, delay: 0 });
   }
 
-  function loss() { tone({ freq: 200, duration: 0.18, type: 'sine', volume: 0.08, endFreq: 140 }); }
+  // Sonido neutro y breve al perder — sin intención punitiva, solo cierre.
+  function loss() {
+    tone({ freq: 200, duration: 0.18, type: 'sine', volume: 0.08, endFreq: 140 });
+  }
 
-  function setMuted(v) { muted = v; localStorage.setItem('frutasdeluxe_muted', String(v)); }
+  function setMuted(value) {
+    muted = value;
+    localStorage.setItem('frutas_muted', String(value));
+  }
 
-  return { startSpinLoop, stopSpinLoop, reelStop, win, bigWin, jackpot, loss, setMuted, isMuted: () => muted };
+  return { startSpinLoop, stopSpinLoop, reelStop, win, jackpot, loss, setMuted, isMuted: () => muted };
 })();
 
 if (muteBtn) {
@@ -126,33 +148,49 @@ function setResult(msg, className) {
 
 function updateBalance(balance) {
   if (balance === null || balance === undefined) return;
+  currentBalance = Number(balance);
   balanceEl.textContent = `${Number(balance).toFixed(2)} USDT`;
 }
 
-function updateJackpot(pool) {
+function updateJackpot(pool, won) {
   jackpotEl.textContent = `${Number(pool).toFixed(2)} USDT`;
+  jackpotEl.classList.toggle('won', Boolean(won));
+  if (won) setTimeout(() => jackpotEl.classList.remove('won'), 2000);
 }
 
 async function apiCall(path, body) {
   const res = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${authToken}`,
+    },
     body: JSON.stringify(body),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.message || data.error || 'ERROR');
+  if (!res.ok) {
+    throw new Error(data.message || data.error || 'ERROR');
+  }
   return data;
 }
 
 async function apiGet(path) {
-  const res = await fetch(`${API_BASE}${path}`, { headers: { Authorization: `Bearer ${authToken}` } });
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: { Authorization: `Bearer ${authToken}` },
+  });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.message || data.error || 'ERROR');
+  if (!res.ok) {
+    throw new Error(data.message || data.error || 'ERROR');
+  }
   return data;
 }
 
 function startSpinAnimation() {
-  reelEls.forEach((el) => { el.classList.add('spinning'); el.classList.remove('win', 'jackpot-cell'); });
+  reelEls.forEach((el) => {
+    el.classList.add('spinning');
+    el.classList.remove('win');
+  });
+
   const keys = Object.keys(SYMBOL_EMOJI);
   const interval = setInterval(() => {
     reelEls.forEach((el) => {
@@ -161,15 +199,18 @@ function startSpinAnimation() {
       }
     });
   }, 70);
+
   return () => clearInterval(interval);
 }
 
 /**
- * 5 carretes parando de a uno, con pausas crecientes — más suspenso que
- * el Frutas normal, acorde a que este juego apunta a premios más grandes.
+ * Para los carretes UNO POR UNO, de izquierda a derecha, con pausas
+ * crecientes entre cada parada — es lo que genera la expectativa de una
+ * tragamonedas real, en vez de mostrar el resultado todo junto de golpe.
  */
 function stopReelsSequentially(reels) {
-  const STOP_DELAYS = [2200, 3600, 5200, 7000, 9000];
+  const STOP_DELAYS = [3600, 5200, 7500]; // ms desde que arrancó el giro
+
   return Promise.all(
     reels.map(
       (symbol, i) =>
@@ -185,9 +226,9 @@ function stopReelsSequentially(reels) {
   );
 }
 
-function highlightWin(count, isJackpot) {
+function highlightWin(count) {
   for (let i = 0; i < count; i++) {
-    reelEls[i].classList.add(isJackpot ? 'jackpot-cell' : 'win');
+    reelEls[i].classList.add('win');
   }
 }
 
@@ -206,29 +247,36 @@ async function spin() {
   const stopAnimation = startSpinAnimation();
   sound.startSpinLoop();
 
+  // Descuento OPTIMISTA: el servidor ya debitó la apuesta en el instante
+  // del click (antes incluso de tirar los carretes) — mostramos ese
+  // descuento de inmediato en pantalla, en vez de esperar a que termine
+  // toda la animación. Así, cuando el premio llega, la subida se nota.
+  if (currentBalance !== null) {
+    balanceEl.textContent = `${(currentBalance - betAmount).toFixed(2)} USDT`;
+  }
+
+  // El pedido al servidor y la animación corren en paralelo. Como la
+  // animación (carretes parando de a uno) dura varios segundos y el
+  // request suele tardar mucho menos, el resultado real ya está
+  // esperando cuando el último carrete para.
   try {
-    const data = await apiCall('/games/frutasdeluxe/spin', { betAmount });
+    const data = await apiCall('/games/frutas/spin', { betAmount });
 
     await stopReelsSequentially(data.reels);
     stopAnimation();
     sound.stopSpinLoop();
-    updateJackpot(data.jackpotPool);
+    updateJackpot(data.jackpotPool, data.jackpotWon);
 
-    if (data.jackpotWon && data.jackpotPending) {
-      // El jackpot NO se acredita solo: queda en revisión manual.
-      highlightWin(5, true);
+    if (data.jackpotWon) {
+      highlightWin(3);
       sound.jackpot();
-      setResult(
-        `🎰 ¡JACKPOT! ${data.payoutAmount.toFixed(2)} USDT en revisión — se acredita en breve.`,
-        'pending'
-      );
-    } else if (data.outcome && data.outcome.startsWith('5_')) {
-      highlightWin(5, false);
-      sound.bigWin();
-      setResult(`🎉 ¡5 iguales! Ganaste ${data.payoutAmount.toFixed(2)} USDT (x${data.multiplier})`, 'win');
-    } else if (data.outcome && data.outcome !== 'loss' && data.outcome !== 'push') {
-      const count = parseInt(data.outcome.split('_')[0], 10) || 2;
-      highlightWin(count, false);
+      setResult(`🎰 ¡JACKPOT! Ganaste ${data.payoutAmount.toFixed(2)} USDT`, 'jackpot');
+    } else if (data.outcome === 'triple') {
+      highlightWin(3);
+      sound.win();
+      setResult(`🎉 ¡Ganaste ${data.payoutAmount.toFixed(2)} USDT! (x${data.multiplier})`, 'win');
+    } else if (data.outcome === 'pair') {
+      highlightWin(2);
       sound.win();
       setResult(`✨ Ganaste ${data.payoutAmount.toFixed(2)} USDT (x${data.multiplier})`, 'win');
     } else if (data.outcome === 'push') {
@@ -248,6 +296,7 @@ async function spin() {
     sound.stopSpinLoop();
     reelEls.forEach((el) => el.classList.remove('spinning'));
     setResult(`Error: ${err.message}`, 'loss');
+    loadBalance(); // el descuento optimista no se confirmó: recargamos el saldo real
   } finally {
     spinning = false;
     spinBtn.disabled = false;
@@ -256,7 +305,9 @@ async function spin() {
 
 async function loadBalance() {
   try {
-    const res = await fetch(`${API_BASE}/me`, { headers: { Authorization: `Bearer ${authToken}` } });
+    const res = await fetch(`${API_BASE}/me`, {
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
     if (!res.ok) return;
     const data = await res.json();
     updateBalance(data.balance);
@@ -267,8 +318,8 @@ async function loadBalance() {
 
 async function loadJackpot() {
   try {
-    const data = await apiGet('/games/frutasdeluxe/jackpot');
-    updateJackpot(data.pool);
+    const data = await apiGet('/games/frutas/jackpot');
+    updateJackpot(data.pool, false);
   } catch (err) {
     console.error('No se pudo cargar el pozo:', err);
   }
