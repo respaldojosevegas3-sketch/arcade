@@ -198,7 +198,7 @@ router.get('/games/frutasdeluxe', async (req, res) => {
  * PUT /api/admin/games/frutasdeluxe
  */
 router.put('/games/frutasdeluxe', async (req, res) => {
-  const { minBet, maxBet, maintenanceMode, weights, paytable, jackpot } = req.body;
+  const { minBet, maxBet, maintenanceMode, weights, paytable, jackpot, manualReviewThreshold } = req.body;
 
   try {
     const current = await getGameConfig('frutasdeluxe');
@@ -207,6 +207,7 @@ router.put('/games/frutasdeluxe', async (req, res) => {
       ...(minBet !== undefined && { minBet }),
       ...(maxBet !== undefined && { maxBet }),
       ...(maintenanceMode !== undefined && { maintenanceMode }),
+      ...(manualReviewThreshold !== undefined && { manualReviewThreshold }),
       weights: weights ? { ...current.weights, ...weights } : current.weights,
       paytable: paytable ? { ...current.paytable, ...paytable } : current.paytable,
       jackpot: jackpot ? { ...current.jackpot, ...jackpot } : current.jackpot,
