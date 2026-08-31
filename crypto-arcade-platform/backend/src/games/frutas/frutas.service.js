@@ -35,7 +35,7 @@ async function spin({ userId, betAmount }) {
   //    jugador de nuevo — el jugador ya pagó su apuesta completa arriba.
   //    Esto es contabilidad interna del pozo, no un segundo cobro.
   const contribution = Number((betAmount * cfg.jackpot.contributionPct).toFixed(6));
-  await addToJackpotPool(contribution);
+  await addToJackpotPool('frutas', contribution);
 
   // 3. Tirada server-side, nunca visible ni influenciable por el cliente.
   const reels = engine.spinReels(cfg.weights);
@@ -49,10 +49,10 @@ async function spin({ userId, betAmount }) {
     // El jackpot paga el pozo acumulado MENOS el piso de reserva. El piso
     // nunca se toca — es lo que garantiza que siempre haya con qué pagar
     // el próximo pozo desde cero.
-    const currentPool = await getJackpotPool(cfg.jackpot.floor);
+    const currentPool = await getJackpotPool('frutas', cfg.jackpot.floor);
     payoutAmount = Number(Math.max(0, currentPool - cfg.jackpot.floor).toFixed(6));
     jackpotWon = true;
-    poolAfter = await resetJackpotPool(cfg.jackpot.floor);
+    poolAfter = await resetJackpotPool('frutas', cfg.jackpot.floor);
   } else {
     payoutAmount = Number((betAmount * result.multiplier).toFixed(6));
   }
@@ -72,14 +72,14 @@ async function spin({ userId, betAmount }) {
     multiplier: result.multiplier,
     payoutAmount,
     jackpotWon,
-    jackpotPool: poolAfter ?? (await getJackpotPool(cfg.jackpot.floor)),
+    jackpotPool: poolAfter ?? (await getJackpotPool('frutas', cfg.jackpot.floor)),
     newBalance,
   };
 }
 
 async function getJackpotInfo() {
   const cfg = await getGameConfig('frutas');
-  const pool = await getJackpotPool(cfg.jackpot.floor);
+  const pool = await getJackpotPool('frutas', cfg.jackpot.floor);
   return {
     pool,
     potentialWin: Number(Math.max(0, pool - cfg.jackpot.floor).toFixed(2)),
