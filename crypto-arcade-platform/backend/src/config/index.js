@@ -129,6 +129,13 @@ module.exports = {
         contributionPct: 0.19, // 19% de cada apuesta va al pozo (vs 2% en Frutas normal)
         floor: 500, // piso mucho más alto: el pozo arranca "sembrado" en $500
       },
+
+      // Cualquier premio AUTOMÁTICO (no jackpot) que supere este monto en
+      // USDT queda pendiente de aprobación manual, igual que el jackpot.
+      // Sin esto, con apuestas grandes, un premio de Estrella x5 (200x)
+      // podría pagarse solo por miles de dólares sin que el admin se
+      // entere. Editable desde el panel sin tocar código.
+      manualReviewThreshold: 500,
     },
   },
 };
