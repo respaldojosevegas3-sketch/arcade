@@ -28,6 +28,7 @@ const betInput = document.getElementById('betAmount');
 const muteBtn = document.getElementById('muteBtn');
 
 let spinning = false;
+let currentBalance = null;
 
 // ============================================================
 // SONIDO — generado en el momento con Web Audio API, sin archivos
@@ -147,6 +148,7 @@ function setResult(msg, className) {
 
 function updateBalance(balance) {
   if (balance === null || balance === undefined) return;
+  currentBalance = Number(balance);
   balanceEl.textContent = `${Number(balance).toFixed(2)} USDT`;
 }
 
@@ -245,6 +247,14 @@ async function spin() {
   const stopAnimation = startSpinAnimation();
   sound.startSpinLoop();
 
+  // Descuento OPTIMISTA: el servidor ya debitó la apuesta en el instante
+  // del click (antes incluso de tirar los carretes) — mostramos ese
+  // descuento de inmediato en pantalla, en vez de esperar a que termine
+  // toda la animación. Así, cuando el premio llega, la subida se nota.
+  if (currentBalance !== null) {
+    balanceEl.textContent = `${(currentBalance - betAmount).toFixed(2)} USDT`;
+  }
+
   // El pedido al servidor y la animación corren en paralelo. Como la
   // animación (carretes parando de a uno) dura varios segundos y el
   // request suele tardar mucho menos, el resultado real ya está
@@ -286,6 +296,7 @@ async function spin() {
     sound.stopSpinLoop();
     reelEls.forEach((el) => el.classList.remove('spinning'));
     setResult(`Error: ${err.message}`, 'loss');
+    loadBalance(); // el descuento optimista no se confirmó: recargamos el saldo real
   } finally {
     spinning = false;
     spinBtn.disabled = false;
