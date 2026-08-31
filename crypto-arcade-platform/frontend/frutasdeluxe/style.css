@@ -1,0 +1,245 @@
+/* frontend/frutasdeluxe/style.css — estilo "máquina clásica" con fondo
+   sunburst, distinto al Frutas normal a propósito. */
+
+:root {
+  --gold: #ffb300;
+  --gold-light: #ffe082;
+  --text: #fff3d6;
+  --text-dim: #d7bfa0;
+  --radius: 16px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  color: var(--text);
+  -webkit-tap-highlight-color: transparent;
+  background:
+    radial-gradient(ellipse at center, rgba(255,180,60,0.35) 0%, rgba(120,10,10,0.0) 55%),
+    repeating-conic-gradient(from 0deg, rgba(255,150,40,0.12) 0deg 6deg, rgba(120,10,10,0) 6deg 12deg),
+    linear-gradient(180deg, #3a0505 0%, #1a0202 100%);
+  background-attachment: fixed;
+}
+
+.app {
+  max-width: 480px;
+  margin: 0 auto;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  gap: 12px;
+}
+
+.auth-box {
+  max-width: 320px;
+  margin: 0 auto;
+  padding: 14px;
+  background: rgba(20, 5, 5, 0.7);
+  border: 1px solid rgba(255, 179, 0, 0.3);
+  border-radius: 10px;
+  width: 100%;
+}
+.auth-box input {
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid #5a3010;
+  background: #1a0f08;
+  color: var(--text);
+}
+.auth-box button {
+  width: 48%;
+  padding: 8px;
+  margin-right: 4%;
+  border-radius: 6px;
+  border: none;
+  background: var(--gold);
+  color: #2a1000;
+  font-weight: 700;
+  cursor: pointer;
+}
+.auth-error { color: #ff6b6b; font-size: 13px; margin-bottom: 8px; }
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(20, 5, 5, 0.6);
+  border: 1px solid rgba(255, 179, 0, 0.25);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+}
+
+.mute-btn { background: none; border: none; font-size: 20px; cursor: pointer; }
+
+.balance .label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.balance .value {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--gold-light);
+}
+
+.jackpot-box {
+  background: linear-gradient(135deg, #4a1a00, #1c0800);
+  border: 2px solid var(--gold);
+  border-radius: var(--radius);
+  padding: 16px;
+  text-align: center;
+  box-shadow: 0 0 32px rgba(255, 179, 0, 0.35), inset 0 0 20px rgba(255,150,0,0.1);
+}
+.jackpot-label {
+  display: block;
+  font-size: 12px;
+  letter-spacing: 1.5px;
+  color: var(--gold);
+  font-weight: 800;
+  margin-bottom: 4px;
+}
+.jackpot-value {
+  display: block;
+  font-size: 34px;
+  font-weight: 900;
+  color: #fff3c4;
+  text-shadow: 0 0 16px rgba(255, 179, 0, 0.8);
+  font-variant-numeric: tabular-nums;
+}
+
+.machine {
+  background: radial-gradient(ellipse 120% 80% at 50% -10%, rgba(255,150,40,0.35), transparent 60%), #150404;
+  border: 3px solid;
+  border-image: linear-gradient(135deg, #ffd98a, #b8790a, #ffd98a) 1;
+  border-radius: 20px;
+  padding: 18px 10px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 40px rgba(255, 120, 0, 0.25);
+}
+
+.grid { width: 100%; max-width: 400px; }
+
+.row {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.row.decor { opacity: 0.35; filter: saturate(0.6); }
+
+.cell {
+  aspect-ratio: 1 / 1;
+  background: #0a0000;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  border: 1.5px solid #5a2a00;
+}
+
+.row.payline .cell {
+  font-size: 36px;
+  border: 2px solid #7a3a00;
+  background: radial-gradient(circle, #200800, #0a0000);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.row.payline .cell.spinning {
+  animation: shake 0.12s linear infinite;
+}
+
+.row.payline .cell.win {
+  border-color: var(--gold);
+  box-shadow: 0 0 18px rgba(255, 179, 0, 0.7);
+}
+
+.row.payline .cell.jackpot-cell {
+  border-color: var(--gold);
+  animation: pulse-gold 0.5s ease-in-out infinite;
+}
+
+@keyframes shake {
+  0% { transform: translateY(-3px); }
+  50% { transform: translateY(3px); }
+  100% { transform: translateY(-3px); }
+}
+
+@keyframes pulse-gold {
+  0%, 100% { box-shadow: 0 0 18px rgba(255, 179, 0, 0.6); }
+  50% { box-shadow: 0 0 36px rgba(255, 179, 0, 1); }
+}
+
+.result-msg {
+  margin-top: 16px;
+  min-height: 20px;
+  font-size: 14px;
+  color: var(--text-dim);
+  text-align: center;
+  font-weight: 600;
+}
+.result-msg.win { color: #ffe082; }
+.result-msg.jackpot { color: #ffd54a; font-size: 16px; }
+.result-msg.loss { color: #c98a6a; }
+.result-msg.pending { color: #7ad0ff; }
+
+.controls {
+  background: rgba(20, 5, 5, 0.6);
+  border: 1px solid rgba(255, 179, 0, 0.25);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.control-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.control-row label { font-size: 13px; color: var(--text-dim); }
+.control-row input {
+  background: #1a0f08;
+  border: 1px solid #5a3010;
+  color: var(--text);
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 15px;
+  width: 140px;
+  text-align: right;
+}
+
+.btn {
+  padding: 14px;
+  border-radius: 12px;
+  border: none;
+  font-size: 16px;
+  font-weight: 800;
+  cursor: pointer;
+  background: linear-gradient(180deg, #ffd54a, #ff9800);
+  color: #2a1000;
+}
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.paytable-hint {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-dim);
+  text-align: center;
+  line-height: 1.5;
+}
