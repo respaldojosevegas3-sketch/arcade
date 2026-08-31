@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Frutas Deluxe — Arcade Platform</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+
+    <div id="authBox" class="auth-box">
+      <div id="loginForm">
+        <input id="authEmail" type="email" placeholder="Email" />
+        <input id="authPassword" type="password" placeholder="Contraseña" />
+        <div id="authError" class="auth-error"></div>
+        <button id="loginBtn">Entrar</button>
+        <button id="registerBtn">Registrarme</button>
+      </div>
+      <div id="loggedInBox" style="display: none;">
+        <span id="loggedInEmail"></span>
+        <button id="logoutBtn">Salir</button>
+      </div>
+    </div>
+
+    <header class="topbar">
+      <div class="balance">
+        <span class="label">Saldo</span>
+        <span class="value" id="balanceValue">-- USDT</span>
+      </div>
+      <button id="muteBtn" class="mute-btn">🔊</button>
+    </header>
+
+    <div class="jackpot-box">
+      <div class="jackpot-label">🎰 POZO ACUMULADO 🎰</div>
+      <div class="jackpot-value" id="jackpotValue">-- USDT</div>
+    </div>
+
+    <main class="machine">
+      <div class="grid">
+        <!-- Fila decorativa de arriba (no paga) -->
+        <div class="row decor" id="rowTop">
+          <div class="cell">🍋</div><div class="cell">🍒</div><div class="cell">🔔</div><div class="cell">💎</div><div class="cell">🍋</div>
+        </div>
+        <!-- Fila del medio: LA ÚNICA que paga -->
+        <div class="row payline" id="rowMid">
+          <div class="cell" id="reel0">🍋</div>
+          <div class="cell" id="reel1">🍋</div>
+          <div class="cell" id="reel2">🍋</div>
+          <div class="cell" id="reel3">🍋</div>
+          <div class="cell" id="reel4">🍋</div>
+        </div>
+        <!-- Fila decorativa de abajo (no paga) -->
+        <div class="row decor" id="rowBottom">
+          <div class="cell">💎</div><div class="cell">🔔</div><div class="cell">🍒</div><div class="cell">🍋</div><div class="cell">💎</div>
+        </div>
+      </div>
+      <p id="resultMsg" class="result-msg"></p>
+    </main>
+
+    <footer class="controls">
+      <div class="control-row">
+        <label for="betAmount">Apuesta (USDT)</label>
+        <input type="number" id="betAmount" value="0.50" min="0.50" step="0.10" />
+      </div>
+      <button id="spinBtn" class="btn">Girar 🎰</button>
+      <p class="paytable-hint">
+        2 iguales 0.5x · 3 = 3x · 4 = 4x · 5 🍋🍒 5x · 🔔 10x · 💎 20x<br/>
+        ⭐ comodín: 3=25x 4=60x 5=200x · 7️⃣×5 = JACKPOT
+      </p>
+    </footer>
+  </div>
+
+  <script src="auth.js"></script>
+  <script src="game.js"></script>
+  <script>
+    const authErrorEl = document.getElementById('authError');
+    const loginFormEl = document.getElementById('loginForm');
+    const loggedInBoxEl = document.getElementById('loggedInBox');
+    const loggedInEmailEl = document.getElementById('loggedInEmail');
+
+    function refreshAuthUI(email) {
+      if (isLoggedIn()) {
+        loginFormEl.style.display = 'none';
+        loggedInBoxEl.style.display = 'block';
+        loggedInEmailEl.textContent = email || '';
+      } else {
+        loginFormEl.style.display = 'block';
+        loggedInBoxEl.style.display = 'none';
+      }
+    }
+
+    document.getElementById('loginBtn').addEventListener('click', async () => {
+      authErrorEl.textContent = '';
+      try {
+        await login(document.getElementById('authEmail').value, document.getElementById('authPassword').value);
+        window.location.reload();
+      } catch (err) {
+        authErrorEl.textContent = 'Email o contraseña incorrectos.';
+      }
+    });
+
+    document.getElementById('registerBtn').addEventListener('click', async () => {
+      authErrorEl.textContent = '';
+      try {
+        await register(document.getElementById('authEmail').value, document.getElementById('authPassword').value);
+        window.location.reload();
+      } catch (err) {
+        authErrorEl.textContent = 'No se pudo registrar (contraseña mínimo 6 caracteres).';
+      }
+    });
+
+    document.getElementById('logoutBtn').addEventListener('click', logout);
+    refreshAuthUI();
+  </script>
+</body>
+</html>
