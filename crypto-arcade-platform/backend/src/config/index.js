@@ -87,5 +87,48 @@ module.exports = {
         floor: 50, // piso en USDT: nunca se paga, queda sembrado para el próximo pozo
       },
     },
+
+    // Frutas Deluxe: versión "grande" de Frutas, 5 posiciones en línea
+    // (se muestra visualmente como grilla de 3 filas x 5 columnas, pero
+    // SOLO la fila del medio paga — las de arriba/abajo son decorativas).
+    // El jackpot de este juego usa un pozo PROPIO y separado del de
+    // Frutas normal (ver src/redis/jackpot.js, clave por juego), y sus
+    // pagos de jackpot NO son automáticos: quedan pendientes de
+    // aprobación manual de un admin (ver jackpotClaims.service.js) como
+    // medida antifraude, dado el monto mucho más grande en juego.
+    frutasdeluxe: {
+      minBet: 0.50,
+      maxBet: 100,
+      maintenanceMode: false,
+
+      // Ajustado para que 5 sietes literales sigan siendo 1 en 1,000,000
+      // a pesar de tener 5 carretes en vez de 3 (por eso SEVEN pesa mucho
+      // más por carrete que en Frutas normal).
+      weights: {
+        LEMON: 0.378510,
+        CHERRY: 0.264960,
+        BELL: 0.151400,
+        GEM: 0.085160,
+        STAR: 0.056780,
+        SEVEN: 0.063096,
+      },
+
+      // "two"/"three"/"four" son multiplicadores planos (iguales para
+      // toda fruta) y "five" escalona por rareza. STAR no tiene "two"
+      // (2 estrellas solas no arman nada por sí mismas). SEVEN no tiene
+      // tabla propia: su único premio es el jackpot progresivo.
+      paytable: {
+        LEMON:  { two: 0.5, three: 3, four: 4, five: 5 },
+        CHERRY: { two: 0.5, three: 3, four: 4, five: 5 },
+        BELL:   { two: 0.5, three: 3, four: 4, five: 10 },
+        GEM:    { two: 0.5, three: 3, four: 4, five: 20 },
+        STAR:   { three: 25, four: 60, five: 200 },
+      },
+
+      jackpot: {
+        contributionPct: 0.19, // 19% de cada apuesta va al pozo (vs 2% en Frutas normal)
+        floor: 500, // piso mucho más alto: el pozo arranca "sembrado" en $500
+      },
+    },
   },
 };
