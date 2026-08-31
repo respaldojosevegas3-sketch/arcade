@@ -7,6 +7,7 @@ const express = require('express');
 const { pool } = require('../src/db/pool');
 const { getGameConfig, setGameConfig } = require('../src/redis/client');
 const { getJackpotPool } = require('../src/redis/jackpot');
+const jackpotClaims = require('../src/models/jackpotClaims.service');
 
 const router = express.Router();
 
@@ -176,6 +177,106 @@ router.post('/users/credit', async (req, res) => {
     res.json({ email: rows[0].email, newBalance: rows[0].balance_usdt });
   } catch (err) {
     console.error('[Admin] Error acreditando saldo:', err);
+    res.status(500).json({ error: 'INTERNAL_ERROR' });
+  }
+});
+
+/**
+ * GET /api/admin/games/frutasdeluxe
+ */
+router.get('/games/frutasdeluxe', async (req, res) => {
+  try {
+    const cfg = await getGameConfig('frutasdeluxe');
+    res.json(cfg);
+  } catch (err) {
+    console.error('[Admin] Error leyendo config de frutasdeluxe:', err);
+    res.status(500).json({ error: 'INTERNAL_ERROR' });
+  }
+});
+
+/**
+ * PUT /api/admin/games/frutasdeluxe
+ */
+router.put('/games/frutasdeluxe', async (req, res) => {
+  const { minBet, maxBet, maintenanceMode, weights, paytable, jackpot } = req.body;
+
+  try {
+    const current = await getGameConfig('frutasdeluxe');
+    const updated = {
+      ...current,
+      ...(minBet !== undefined && { minBet }),
+      ...(maxBet !== undefined && { maxBet }),
+      ...(maintenanceMode !== undefined && { maintenanceMode }),
+      weights: weights ? { ...current.weights, ...weights } : current.weights,
+      paytable: paytable ? { ...current.paytable, ...paytable } : current.paytable,
+      jackpot: jackpot ? { ...current.jackpot, ...jackpot } : current.jackpot,
+    };
+
+    await setGameConfig('frutasdeluxe', updated);
+    res.json(updated);
+  } catch (err) {
+    console.error('[Admin] Error actualizando config de frutasdeluxe:', err);
+    res.status(500).json({ error: 'INTERNAL_ERROR' });
+  }
+});
+
+/**
+ * GET /api/admin/games/frutasdeluxe/jackpot
+ */
+router.get('/games/frutasdeluxe/jackpot', async (req, res) => {
+  try {
+    const cfg = await getGameConfig('frutasdeluxe');
+    const pool = await getJackpotPool('frutasdeluxe', cfg.jackpot.floor);
+    res.json({ pool, floor: cfg.jackpot.floor, payoutIfWonNow: Math.max(0, pool - cfg.jackpot.floor) });
+  } catch (err) {
+    console.error('[Admin] Error leyendo pozo de frutasdeluxe:', err);
+    res.status(500).json({ error: 'INTERNAL_ERROR' });
+  }
+});
+
+/**
+ * GET /api/admin/jackpots?status=pending
+ * Lista de reclamos de jackpot esperando revisión manual (por ahora solo
+ * lo usa Frutas Deluxe, pero queda genérico por si otro juego lo suma).
+ */
+router.get('/jackpots', async (req, res) => {
+  try {
+    const claims = await jackpotClaims.listClaims({ status: req.query.status });
+    res.json(claims);
+  } catch (err) {
+    console.error('[Admin] Error listando reclamos de jackpot:', err);
+    res.status(500).json({ error: 'INTERNAL_ERROR' });
+  }
+});
+
+/**
+ * POST /api/admin/jackpots/:id/approve
+ * Acredita el premio real al jugador. Usar SOLO después de verificar
+ * manualmente que la tirada es legítima (revisar reels/session_id contra
+ * los logs del backend si hay dudas).
+ */
+router.post('/jackpots/:id/approve', async (req, res) => {
+  try {
+    const result = await jackpotClaims.approveClaim({ claimId: req.params.id });
+    if (!result) return res.status(404).json({ error: 'CLAIM_NOT_FOUND_OR_ALREADY_RESOLVED' });
+    res.json(result);
+  } catch (err) {
+    console.error('[Admin] Error aprobando reclamo de jackpot:', err);
+    res.status(500).json({ error: 'INTERNAL_ERROR' });
+  }
+});
+
+/**
+ * POST /api/admin/jackpots/:id/reject
+ * Rechaza el reclamo (ej. se detectó manipulación). El jugador no cobra.
+ */
+router.post('/jackpots/:id/reject', async (req, res) => {
+  try {
+    const result = await jackpotClaims.rejectClaim({ claimId: req.params.id });
+    if (!result) return res.status(404).json({ error: 'CLAIM_NOT_FOUND_OR_ALREADY_RESOLVED' });
+    res.json(result);
+  } catch (err) {
+    console.error('[Admin] Error rechazando reclamo de jackpot:', err);
     res.status(500).json({ error: 'INTERNAL_ERROR' });
   }
 });
